@@ -61,6 +61,8 @@ class Main {
         String xbrz_exe_hash = "34D9EAF5FBC93BC7B8A3B62431B6151541FF452265875964A2A0699A6368D2B6";
         Path ffmpeg_exe = executables_dir.resolve("ffmpeg.exe");
         String ffmpeg_exe_hash = "72A489ECCD008C2EC2C0A5856C5C75BC3D8BBFA90166C4566865C246445E6AA3";
+        Path oxipng_exe = executables_dir.resolve("oxipng.exe");
+        String oxipng_exe_hash = "35AE3980AB831AF64F4AECC98F69B81BFA146FA750A61D17EBBB12520128CBC8";
         FileOps.ensureFileParentChain(xbrz_exe);
 
         checkOrRestore("ScalerTest", "https://sourceforge.net/projects/xbrz/files/ScalerTest_1.2.zip/download",
@@ -71,6 +73,11 @@ class Main {
         checkOrRestore("FFMPEG", "https://github.com/GyanD/codexffmpeg/releases/download/9.0.1/ffmpeg-9.0.1-essentials_build.zip",
             executables_dir.resolve("ffmpeg-9.0.1-essentials_build.zip"), "FEC81AE03971D9DD4BE3EBE02E263BD2EC1D789483F931BDBA5F5715E65DA2E9",
             "ffmpeg-9.0.1-essentials_build/bin/ffmpeg.exe", ffmpeg_exe, ffmpeg_exe_hash
+        );
+
+        checkOrRestore("OxiPNG", "https://github.com/oxipng/oxipng/releases/download/v10.2.1/oxipng-10.2.1-x86_64-pc-windows-msvc.zip",
+            executables_dir.resolve("oxipng-10.2.1-x86_64-pc-windows-msvc.zip"), "7E940F83EE46874B73F53031F96A15834CB70B220AF27391FB06FE7B4DD798E1",
+            "oxipng-10.2.1-x86_64-pc-windows-msvc/oxipng.exe", oxipng_exe, oxipng_exe_hash
         );
     }
 }
