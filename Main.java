@@ -5,8 +5,34 @@ import java.util.*;
 import java.util.zip.*;
 
 class Main {
+    private static Path input_parent;
+    private static Path output_parent;
+    private static boolean input_is_zipped = false;
+
+    private static void abort(String reason){
+        System.out.println("ABORT.");
+        System.out.println();
+        System.out.println(reason);
+        System.exit(1);
+    }
+
+    private static void detectAndValidateZippedInput(){
+        if(Files.isDirectory(input_parent, LinkOption.NOFOLLOW_LINKS)){
+            input_is_zipped = false;
+            return;
+        }
+        if(!Files.isRegularFile(input_parent, LinkOption.NOFOLLOW_LINKS)){
+            abort("Input path exists, but is neither a directory nor a file.");
+        }
+        try(ZipFile zip = new ZipFile(input_parent.toFile())){
+            input_is_zipped = true;
+        } catch (Exception e) {
+            abort("Input path appears to be a file, but I cannot confirm it's a ZIP or JAR.");
+        }
+    }
+
     private static Path getClassDir() throws URISyntaxException, IOException {
-        File parent = Paths.get(Main.class.getProtectionDomain().getCodeSource().getLocation().toURI()).toFile();
+        File parent = Path.of(Main.class.getProtectionDomain().getCodeSource().getLocation().toURI()).toFile();
         //Parent could be a JAR. Keep searching upwards if that's the case.
         while(!parent.isDirectory()){
             parent = parent.getParentFile();
@@ -26,10 +52,7 @@ class Main {
                 try(ZipFile zip = new ZipFile(zip_destination.toFile())){
                     ZipEntry entry = zip.getEntry(exe_entry_name);
                     if(entry == null){
-                        System.out.println("ABORT.");
-                        System.out.println();
-                        System.out.println("Could not locate " + task_title + " EXE in ZIP source.");
-                        System.exit(0);
+                        abort("Could not locate " + task_title + " EXE in ZIP source.");
                     }
                     try(InputStream input = zip.getInputStream(entry)){
                         try(OutputStream output = Files.newOutputStream(exe_destination)){
@@ -41,21 +64,28 @@ class Main {
                 if(FileOps.existsAndMatchesHash(exe_destination, exe_hash)){
                     System.out.println("Done.");
                 } else {
-                    System.out.println("ABORT.");
-                    System.out.println();
-                    System.out.println("Unpacked " + task_title + " from ZIP source and found wrong hash. Cancelling.");
-                    System.exit(0);
+                    abort("Unpacked " + task_title + " from ZIP source and found wrong hash. Cancelling.");
                 }
             } else {
-                System.out.println("ABORT.");
-                System.out.println();
-                System.out.println("Could not download ZIP source for " + task_title + ". Cancelling.");
-                System.exit(0);
+                abort("Could not download ZIP source for " + task_title + ". Cancelling.");
             }
         }
     }
 
     public static void main(String[] args) throws Exception {
+        //Validate and resolve input and output paths
+        if(args.length != 2){
+            abort("Wrong number of console arguments. Expecting two paths.");
+        }
+        input_parent = Path.of(args[0]).toAbsolutePath();
+        if(!Files.exists(input_parent, LinkOption.NOFOLLOW_LINKS)){
+            abort("Input path must be an existing directory, ZIP, or JAR.");
+        }
+        detectAndValidateZippedInput();
+        output_parent = Path.of(args[1]).toAbsolutePath();
+        System.out.println("Input and output paths ready.");
+
+        //Check and possibly restore executable dependencies
         Path executables_dir = getClassDir().resolve("Dependencies");
         Path xbrz_exe = executables_dir.resolve("ScalerTest_Windows.exe");
         String xbrz_exe_hash = "34D9EAF5FBC93BC7B8A3B62431B6151541FF452265875964A2A0699A6368D2B6";
