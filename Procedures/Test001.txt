@@ -1,0 +1,6 @@
+// Test #1
+// Comment skipping, and reading/writing images
+
+read assets/minecraft/textures/item/apple.png Apple
+write Apple TestOuts/Apple_Copy_1.png
+write Booger TestOuts/Apple_Copy_2.png

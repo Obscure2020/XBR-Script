@@ -1,6 +1,7 @@
 import java.io.*;
 import java.net.URI;
 import java.net.http.*;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.security.*;
 import java.util.*;
@@ -142,6 +143,14 @@ public class FileOps {
             }
         }
         return success;
+    }
+
+    public static String[] loadStrippedTextFile(Path target) throws IOException {
+        String content = Files.readString(target, StandardCharsets.UTF_8);
+        if(content.charAt(0) == 0xFEFF){
+            content = content.substring(1);
+        }
+        return content.strip().lines().map(s -> s.strip()).filter(s -> !s.isEmpty()).toList().toArray(new String[0]);
     }
 
 }

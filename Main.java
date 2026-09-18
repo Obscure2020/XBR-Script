@@ -2,9 +2,20 @@ import java.io.*;
 import java.net.*;
 import java.nio.file.*;
 import java.util.*;
+import java.util.stream.Stream;
 import java.util.zip.*;
 
 class Main {
+    public static final String ANSI_RESET = "\u001B[0m";
+    public static final String ANSI_BLACK = "\u001B[30m";
+    public static final String ANSI_BRIGHT_RED = "\u001B[91m";
+    public static final String ANSI_BRIGHT_GREEN = "\u001B[92m";
+    public static final String ANSI_BRIGHT_YELLOW = "\u001B[93m";
+    public static final String ANSI_BRIGHT_BLUE = "\u001B[94m";
+    public static final String ANSI_BRIGHT_PURPLE = "\u001B[95m";
+    public static final String ANSI_BRIGHT_CYAN = "\u001B[96m";
+    public static final String ANSI_BRIGHT_WHITE = "\u001B[97m";
+
     private static Path input_parent;
     private static Path output_parent;
     private static boolean input_is_zipped = false;
@@ -41,7 +52,7 @@ class Main {
         return parent.toPath();
     }
 
-    public static void checkOrRestore(String task_title, String zip_url, Path zip_destination, String zip_hash, String exe_entry_name, Path exe_destination, String exe_hash) throws IOException{
+    private static void checkOrRestore(String task_title, String zip_url, Path zip_destination, String zip_hash, String exe_entry_name, Path exe_destination, String exe_hash) throws IOException{
         if(FileOps.existsAndMatchesHash(exe_destination, exe_hash)){
             System.out.println(task_title + " hash verified.");
         } else {
@@ -72,6 +83,68 @@ class Main {
         }
     }
 
+    private static Path[] listProcedures(Path procedures_dir) throws IOException {
+        ArrayList<Path> result = new ArrayList<>();
+        try(Stream<Path> stream = Files.walk(procedures_dir)){
+            stream.filter(p -> Files.isRegularFile(p, LinkOption.NOFOLLOW_LINKS) && p.toString().toLowerCase().endsWith(".txt"))
+                .forEachOrdered(p -> result.add(p));
+        }
+        return result.toArray(new Path[0]);
+    }
+
+    private static ProcedureVerb[] parseProcedure(Path procedure) throws Exception {
+        ArrayList<ProcedureVerb> result = new ArrayList<>();
+        HashSet<String> virtual_context = new HashSet<>();
+        String[] lines = FileOps.loadStrippedTextFile(procedure);
+
+        for(int i=0; i<lines.length; i++){
+            long human_line = ((long) i) + 1;
+            String line = lines[i];
+            String[] chunks = line.split("\\s+");
+            ProcedureVerb verb = null;
+
+            switch(chunks[0]){
+                case "//":
+                    break;
+
+                case "read":{
+                    verb = new ReadVerb(human_line, chunks, virtual_context);
+                    break;
+                }
+
+                default: {
+                    StringBuilder sb = new StringBuilder("On line ");
+                    sb.append(human_line);
+                    sb.append(": Unrecognized verb \"");
+                    sb.append(chunks[0]);
+                    sb.append("\".");
+                    if(chunks[0].startsWith("//")){
+                        sb.append(ANSI_BRIGHT_CYAN + " (Hint: Comments must start with \"" + ANSI_RESET + "// " + ANSI_BRIGHT_CYAN + "\", INCLUDING the space.)" + ANSI_RESET);
+                    }
+                    throw new ProcedureParseException(sb.toString());
+                }
+            }
+
+            if(verb != null){
+                result.add(verb);
+            }
+        }
+
+        return result.toArray(new ProcedureVerb[0]);
+    }
+
+    public static boolean checkInputRelativeExists(String relative_path) throws IOException {
+        if(input_is_zipped){
+            try(ZipFile zip = new ZipFile(input_parent.toFile())){
+                ZipEntry entry = zip.getEntry(relative_path);
+                return (entry != null) && (!entry.isDirectory());
+            }
+        } else {
+            Path target = input_parent.resolve(relative_path);
+            return Files.exists(target, LinkOption.NOFOLLOW_LINKS) && Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS);
+        }
+    }
+
     public static void main(String[] args) throws Exception {
         //Validate and resolve input and output paths
         if(args.length != 2){
@@ -86,7 +159,8 @@ class Main {
         System.out.println("Input and output paths ready.");
 
         //Check and possibly restore executable dependencies
-        Path executables_dir = getClassDir().resolve("Dependencies");
+        Path class_dir = getClassDir();
+        Path executables_dir = class_dir.resolve("Dependencies");
         Path xbrz_exe = executables_dir.resolve("ScalerTest_Windows.exe");
         String xbrz_exe_hash = "34D9EAF5FBC93BC7B8A3B62431B6151541FF452265875964A2A0699A6368D2B6";
         Path ffmpeg_exe = executables_dir.resolve("ffmpeg.exe");
@@ -109,5 +183,51 @@ class Main {
             executables_dir.resolve("oxipng-10.2.1-x86_64-pc-windows-msvc.zip"), "7E940F83EE46874B73F53031F96A15834CB70B220AF27391FB06FE7B4DD798E1",
             "oxipng-10.2.1-x86_64-pc-windows-msvc/oxipng.exe", oxipng_exe, oxipng_exe_hash
         );
+
+        //Enumerate procedures
+        System.out.println();
+        Path procedures_dir = class_dir.resolve("Procedures");
+        Path[] procedures = listProcedures(procedures_dir);
+        if(procedures.length == 1){
+            System.out.println(procedures.length + " procedure found.");
+        } else {
+            System.out.println(procedures.length + " procedures found.");
+        }
+        if(procedures.length < 1){
+            return;
+        }
+        System.out.println();
+
+        //Parse and Execute procedures
+        int successful_procs = 0;
+        int failed_procs = 0;
+        for(Path path : procedures){
+            ProcedureVerb[] verbs = null;
+            try{
+                verbs = parseProcedure(path);
+            } catch (ProcedureParseException e){
+                System.out.println(ANSI_BRIGHT_RED + "PROBLEM" + ANSI_RESET + " while parsing procedure " + ANSI_BRIGHT_YELLOW + procedures_dir.relativize(path).toString() + ANSI_RESET);
+                System.out.println(e.getMessage());
+                System.out.println();
+                failed_procs++;
+                continue;
+            }
+            successful_procs++;
+            // At this point we would create a new operating context,
+            // and then iterate through the members of "verbs",
+            // executing each one in sequence.
+        }
+
+        if(successful_procs == 1){
+            System.out.println(successful_procs + " procedure successfully parsed and executed.");
+        } else if(successful_procs > 1){
+            System.out.println(successful_procs + " procedures successfully parsed and executed.");
+        }
+
+        if(failed_procs == 1){
+            System.out.println(failed_procs + " procedure encountered parse issues.");
+        } else if(failed_procs > 1){
+            System.out.println(failed_procs + " procedures encountered parse issues.");
+        }
     }
 }
