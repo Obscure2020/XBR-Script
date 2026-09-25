@@ -17,4 +17,8 @@ public class ReadVerb implements ProcedureVerb {
         virtual_context.add(write_variable);
     }
 
+    public void Execute(ProcedureContext context) throws Exception {
+        context.variables.put(write_variable, Main.readInputRelative(read_target));
+    }
+
 }

@@ -4,6 +4,8 @@ import java.nio.file.*;
 import java.util.*;
 import java.util.stream.Stream;
 import java.util.zip.*;
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
 
 class Main {
     public static final String ANSI_RESET = "\u001B[0m";
@@ -19,6 +21,11 @@ class Main {
     private static Path input_parent;
     private static Path output_parent;
     private static boolean input_is_zipped = false;
+    private static Path xbrz_exe;
+    private static Path ffmpeg_exe;
+    private static Path oxipng_exe;
+
+    // Private Methods
 
     private static void abort(String reason){
         System.out.println("ABORT.");
@@ -92,14 +99,40 @@ class Main {
         return result.toArray(new Path[0]);
     }
 
+    private static BufferedImage normalize(BufferedImage input){
+        final int width = input.getWidth();
+        final int height = input.getHeight();
+        BufferedImage result = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+        for(int y=0; y<height; y++){
+            for(int x=0; x<width; x++){
+                final int original = input.getRGB(x, y);
+                final int alpha = original >>> 24;
+                final int copy = (alpha == 0) ? 0 : original;
+                result.setRGB(x, y, copy);
+            }
+        }
+        return result;
+    }
+
+    private static boolean checkOutputRelativeExists(String relative_path) throws IOException {
+        Path target = output_parent.resolve(relative_path);
+        return Files.exists(target, LinkOption.NOFOLLOW_LINKS) && Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS);
+    }
+
+    private static BufferedImage readOutputRelative(String relative_path) throws IOException {
+        File target = output_parent.resolve(relative_path).toFile().getCanonicalFile();
+        return normalize(ImageIO.read(target));
+    }
+
     private static ProcedureVerb[] parseProcedure(Path procedure) throws Exception {
         ArrayList<ProcedureVerb> result = new ArrayList<>();
         HashSet<String> virtual_context = new HashSet<>();
         String[] lines = FileOps.loadStrippedTextFile(procedure);
 
         for(int i=0; i<lines.length; i++){
-            long human_line = ((long) i) + 1;
             String line = lines[i];
+            if(line.isEmpty()) continue;
+            long human_line = ((long) i) + 1;
             String[] chunks = line.split("\\s+");
             ProcedureVerb verb = null;
 
@@ -109,6 +142,11 @@ class Main {
 
                 case "read":{
                     verb = new ReadVerb(human_line, chunks, virtual_context);
+                    break;
+                }
+
+                case "write":{
+                    verb = new WriteVerb(human_line, chunks, virtual_context);
                     break;
                 }
 
@@ -133,6 +171,8 @@ class Main {
         return result.toArray(new ProcedureVerb[0]);
     }
 
+    // Public methods used by Verbs
+
     public static boolean checkInputRelativeExists(String relative_path) throws IOException {
         if(input_is_zipped){
             try(ZipFile zip = new ZipFile(input_parent.toFile())){
@@ -144,6 +184,36 @@ class Main {
             return Files.exists(target, LinkOption.NOFOLLOW_LINKS) && Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS);
         }
     }
+
+    public static BufferedImage readInputRelative(String relative_path) throws IOException {
+        BufferedImage read_result = null;
+        if(input_is_zipped){
+            try(ZipFile zip = new ZipFile(input_parent.toFile());
+                InputStream input_stream = zip.getInputStream(zip.getEntry(relative_path))){
+                read_result = ImageIO.read(input_stream);
+            }
+        } else {
+            File target = input_parent.resolve(relative_path).toFile().getCanonicalFile();
+            read_result = ImageIO.read(target);
+        }
+        return normalize(read_result);
+    }
+
+    // Plan for public static void writeOutputRelative:
+    // - Check if item already exists at destination path.
+    // - If yes:
+    //     - Read in image already present, and normalize it
+    //     - Perform equivalence check to outgoing image
+    //     - If equivalent, return. No further work to be done.
+    //     - If not equivalent, fall through to following case.
+    // - If no:
+    //     - Create a new temporary work directory.
+    //     - Write output image into work directory.
+    //     - Perform FFMPEG re-encoding to sibling file in work directory. (Technique borrowed from SquooshPNG project)
+    //     - Perform OxiPNG in-situ optimization on result from FFMPEG.
+    //     - Ensure parent chain exists for destination path.
+    //     - Power Copy the final result file to the destination path.
+    //     - Power Delete the work directory.
 
     public static void main(String[] args) throws Exception {
         //Validate and resolve input and output paths
@@ -161,11 +231,11 @@ class Main {
         //Check and possibly restore executable dependencies
         Path class_dir = getClassDir();
         Path executables_dir = class_dir.resolve("Dependencies");
-        Path xbrz_exe = executables_dir.resolve("ScalerTest_Windows.exe");
+        xbrz_exe = executables_dir.resolve("ScalerTest_Windows.exe");
         String xbrz_exe_hash = "34D9EAF5FBC93BC7B8A3B62431B6151541FF452265875964A2A0699A6368D2B6";
-        Path ffmpeg_exe = executables_dir.resolve("ffmpeg.exe");
+        ffmpeg_exe = executables_dir.resolve("ffmpeg.exe");
         String ffmpeg_exe_hash = "72A489ECCD008C2EC2C0A5856C5C75BC3D8BBFA90166C4566865C246445E6AA3";
-        Path oxipng_exe = executables_dir.resolve("oxipng.exe");
+        oxipng_exe = executables_dir.resolve("oxipng.exe");
         String oxipng_exe_hash = "35AE3980AB831AF64F4AECC98F69B81BFA146FA750A61D17EBBB12520128CBC8";
         FileOps.ensureFileParentChain(xbrz_exe);
 
@@ -200,7 +270,8 @@ class Main {
 
         //Parse and Execute procedures
         int successful_procs = 0;
-        int failed_procs = 0;
+        int failed_parses = 0;
+        int failed_runs = 0;
         for(Path path : procedures){
             ProcedureVerb[] verbs = null;
             try{
@@ -209,13 +280,36 @@ class Main {
                 System.out.println(ANSI_BRIGHT_RED + "PROBLEM" + ANSI_RESET + " while parsing procedure " + ANSI_BRIGHT_YELLOW + procedures_dir.relativize(path).toString() + ANSI_RESET);
                 System.out.println(e.getMessage());
                 System.out.println();
-                failed_procs++;
+                failed_parses++;
                 continue;
             }
-            successful_procs++;
-            // At this point we would create a new operating context,
-            // and then iterate through the members of "verbs",
-            // executing each one in sequence.
+            System.gc();
+            int attempts = 0;
+            Exception last_seen = null;
+            while((attempts >= 0) && (attempts < 5)){
+                try{
+                    ProcedureContext context = new ProcedureContext();
+                    for(ProcedureVerb verb : verbs){
+                        verb.Execute(context);
+                    }
+                    attempts = -1;
+                } catch (Exception e){
+                    last_seen = e;
+                    attempts++;
+                }
+            }
+            if(attempts < 0){
+                successful_procs++;
+            } else {
+                System.out.println(ANSI_BRIGHT_RED + "PROBLEM" + ANSI_RESET + " while running procedure " + ANSI_BRIGHT_YELLOW + procedures_dir.relativize(path).toString() + ANSI_RESET);
+                if(last_seen == null){
+                    System.out.println(ANSI_BRIGHT_CYAN + "Null exception." + ANSI_RESET);
+                } else {
+                    System.out.println(last_seen.getMessage());
+                }
+                System.out.println();
+                failed_runs++;
+            }
         }
 
         if(successful_procs == 1){
@@ -224,10 +318,16 @@ class Main {
             System.out.println(successful_procs + " procedures successfully parsed and executed.");
         }
 
-        if(failed_procs == 1){
-            System.out.println(failed_procs + " procedure encountered parse issues.");
-        } else if(failed_procs > 1){
-            System.out.println(failed_procs + " procedures encountered parse issues.");
+        if(failed_parses == 1){
+            System.out.println(failed_parses + " procedure encountered parse issues.");
+        } else if(failed_parses > 1){
+            System.out.println(failed_parses + " procedures encountered parse issues.");
+        }
+
+        if(failed_runs == 1){
+            System.out.println(failed_runs + " procedure encountered execution issues.");
+        } else if(failed_runs > 1){
+            System.out.println(failed_runs + " procedures encountered execution issues.");
         }
     }
 }
