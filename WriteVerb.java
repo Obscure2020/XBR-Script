@@ -17,7 +17,7 @@ public class WriteVerb implements ProcedureVerb {
     }
 
     public void Execute(ProcedureContext context) throws Exception {
-        System.out.println(Main.ANSI_BRIGHT_RED + "WriteVerb currently has no implemented execution!" + Main.ANSI_RESET);
+        Main.writeOutputRelative(context.variables.get(read_variable), write_target);
     }
 
 }

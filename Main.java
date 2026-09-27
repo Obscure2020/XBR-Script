@@ -114,14 +114,19 @@ class Main {
         return result;
     }
 
-    private static boolean checkOutputRelativeExists(String relative_path) throws IOException {
-        Path target = output_parent.resolve(relative_path);
-        return Files.exists(target, LinkOption.NOFOLLOW_LINKS) && Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS);
-    }
-
-    private static BufferedImage readOutputRelative(String relative_path) throws IOException {
-        File target = output_parent.resolve(relative_path).toFile().getCanonicalFile();
-        return normalize(ImageIO.read(target));
+    private static boolean checkImagesIdentical(BufferedImage first, BufferedImage second){
+        final int width = first.getWidth();
+        if(width != second.getWidth()) return false;
+        final int height = first.getHeight();
+        if(height != second.getHeight()) return false;
+        for(int y=0; y<height; y++){
+            for(int x=0; x<width; x++){
+                final int first_pixel = first.getRGB(x, y);
+                final int second_pixel = second.getRGB(x, y);
+                if(first_pixel != second_pixel) return false;
+            }
+        }
+        return true;
     }
 
     private static ProcedureVerb[] parseProcedure(Path procedure) throws Exception {
@@ -199,21 +204,40 @@ class Main {
         return normalize(read_result);
     }
 
-    // Plan for public static void writeOutputRelative:
-    // - Check if item already exists at destination path.
-    // - If yes:
-    //     - Read in image already present, and normalize it
-    //     - Perform equivalence check to outgoing image
-    //     - If equivalent, return. No further work to be done.
-    //     - If not equivalent, fall through to following case.
-    // - If no:
-    //     - Create a new temporary work directory.
-    //     - Write output image into work directory.
-    //     - Perform FFMPEG re-encoding to sibling file in work directory. (Technique borrowed from SquooshPNG project)
-    //     - Perform OxiPNG in-situ optimization on result from FFMPEG.
-    //     - Ensure parent chain exists for destination path.
-    //     - Power Copy the final result file to the destination path.
-    //     - Power Delete the work directory.
+    public static void writeOutputRelative(BufferedImage img, String relative_path) throws IOException, InterruptedException {
+        final Path destination = output_parent.resolve(relative_path);
+        if(Files.exists(destination, LinkOption.NOFOLLOW_LINKS) && Files.isRegularFile(destination, LinkOption.NOFOLLOW_LINKS)){
+            BufferedImage old_img = normalize(ImageIO.read(destination.toFile().getCanonicalFile()));
+            if(checkImagesIdentical(img, old_img)) return;
+        }
+
+        final Path temp_directory_path = Files.createTempDirectory("xbrWork");
+        final File temp_directory_file = temp_directory_path.toFile().getCanonicalFile();
+        final String work_file_one_name = "work.png";
+        final String work_file_two_name = "final.png";
+        final Path work_file_one_path = temp_directory_path.resolve(work_file_one_name);
+        final File work_file_one_file = work_file_one_path.toFile().getCanonicalFile();
+        final Path work_file_two_path = temp_directory_path.resolve(work_file_two_name);
+
+        ImageIO.write(img, "PNG", work_file_one_file);
+        ProcessBuilder pb = new ProcessBuilder(ffmpeg_exe.toRealPath().toString(), "-hide_banner", "-y", "-i", work_file_one_name, "-c", "png", "-update", "1", work_file_two_name);
+        pb.directory(temp_directory_file);
+        pb.redirectOutput(ProcessBuilder.Redirect.DISCARD);
+        pb.redirectError(ProcessBuilder.Redirect.DISCARD);
+        pb.start().waitFor();
+        if(!Files.exists(work_file_two_path, LinkOption.NOFOLLOW_LINKS)){
+            throw new IOException("Could not locate \"" + work_file_two_name + "\" after requesting FFMPEG to create it.");
+        }
+        pb = new ProcessBuilder(oxipng_exe.toRealPath().toString(), "-o", "max", "-s", "-a", "-z", "--zi", "16", work_file_two_name);
+        pb.directory(temp_directory_file);
+        pb.redirectOutput(ProcessBuilder.Redirect.DISCARD);
+        pb.redirectError(ProcessBuilder.Redirect.DISCARD);
+        pb.start().waitFor();
+
+        FileOps.ensureFileParentChain(destination);
+        FileOps.powerCopy(work_file_two_path, destination);
+        FileOps.powerDelete(temp_directory_path);
+    }
 
     public static void main(String[] args) throws Exception {
         //Validate and resolve input and output paths

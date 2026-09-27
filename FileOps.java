@@ -5,11 +5,13 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.security.*;
 import java.util.*;
+import java.util.regex.Pattern;
 
 public class FileOps {
 
     private static MessageDigest digest;
-    private static HexFormat hex = HexFormat.of().withUpperCase();
+    private static final HexFormat hex = HexFormat.of().withUpperCase();
+    private static final HashMap<String, String> whereCache = new HashMap<>();
 
     static {
         digest = null;
@@ -18,6 +20,23 @@ public class FileOps {
         } catch (NoSuchAlgorithmException e){
             digest = null;
         }
+    }
+
+    public static String cmdWhere(String prgName) throws InterruptedException, IOException {
+        String cached = whereCache.get(prgName);
+        if(cached != null) return cached;
+        ProcessBuilder pb = new ProcessBuilder("cmd.exe", "/c", "where" , prgName);
+        Process p = pb.start();
+        String[] resultLines = p.inputReader().lines().toList().toArray(new String[0]);
+        p.waitFor();
+        for(String s : resultLines){
+            String line = s.strip();
+            if(line.length() > 0){
+                whereCache.put(prgName, line);
+                return line;
+            }
+        }
+        throw new RuntimeException("cmdWhere has failed while trying to find \"" + prgName + "\". This should not be possible.");
     }
 
     public static boolean powerDelete(Path target){
@@ -65,6 +84,53 @@ public class FileOps {
             }
         }
         return true;
+    }
+
+    public static void powerCopy(Path source, Path destination) throws IOException, InterruptedException {
+        if(!Files.exists(source, LinkOption.NOFOLLOW_LINKS)) return;
+        ensureFileParentChain(destination);
+        Pattern success_pattern = Pattern.compile("\\d+ File\\(s\\) copied");
+        ArrayList<String> factors = new ArrayList<>();
+        factors.add(cmdWhere("XCOPY"));
+        factors.add(source.toAbsolutePath().toString());
+        if(Files.isDirectory(source, LinkOption.NOFOLLOW_LINKS)){
+            factors.add(destination.toAbsolutePath().toString() + File.separatorChar);
+            factors.add("/E");
+        } else {
+            factors.add(destination.toAbsolutePath().toString());
+            factors.add("/-I");
+        }
+        factors.add("/V");
+        factors.add("/H");
+        factors.add("/K");
+        factors.add("/Y");
+        factors.add("/B");
+        factors.add("/NOCLONE");
+        factors.add("/Q");
+        ProcessBuilder pb = new ProcessBuilder(factors);
+        pb.redirectInput(ProcessBuilder.Redirect.INHERIT);
+        pb.redirectError(ProcessBuilder.Redirect.DISCARD);
+        Process p = pb.start();
+        StringBuilder sb = new StringBuilder();
+        BufferedReader reader = p.inputReader();
+        System.gc();
+        while(true){
+            int next = reader.read();
+            if(next < 0) break;
+            char c = (char) next;
+            if(c < ' '){
+                sb.append(' ');
+            } else {
+                sb.append(c);
+            }
+            if(c == 'd') break;
+        }
+        reader.close();
+        p.waitFor();
+        String response = sb.toString().strip();
+        if(!success_pattern.matcher(response).matches()){
+            throw new IOException("Anomalous message from XCOPY: \"" + response + "\"");
+        }
     }
 
     public static void ensureFileParentChain(Path target) throws FileNotFoundException {
