@@ -129,6 +129,43 @@ class Main {
         return true;
     }
 
+private static String[] chunkLine(String line){
+    ArrayList<String> result = new ArrayList<>();
+    boolean in_string = false;
+    StringBuilder sb = new StringBuilder();
+    int[] points = line.codePoints().toArray();
+
+    for(int codepoint : points){
+        if(codepoint == ((int)'"')){
+            if(in_string){
+                result.add(sb.toString());
+            } else {
+                String[] pieces = sb.toString().strip().split("\\s+");
+                for(String p : pieces){
+                    if(!p.isEmpty()) result.add(p);
+                }
+            }
+            sb.setLength(0);
+            in_string = !in_string;
+        } else {
+            sb.appendCodePoint(codepoint);
+        }
+    }
+
+    if(sb.length() > 0){
+        if(in_string){
+            result.add(sb.toString());
+        } else {
+            String[] pieces = sb.toString().strip().split("\\s+");
+            for(String p : pieces){
+                if(!p.isEmpty()) result.add(p);
+            }
+        }
+    }
+
+    return result.toArray(new String[0]);
+}
+
     private static ProcedureVerb[] parseProcedure(Path procedure) throws Exception {
         ArrayList<ProcedureVerb> result = new ArrayList<>();
         HashSet<String> virtual_context = new HashSet<>();
@@ -137,8 +174,7 @@ class Main {
         for(int i=0; i<lines.length; i++){
             String line = lines[i];
             if(line.isEmpty()) continue;
-            long human_line = ((long) i) + 1;
-            String[] chunks = line.split("\\s+");
+            String[] chunks = chunkLine(line);
             ProcedureVerb verb = null;
 
             switch(chunks[0]){
@@ -146,18 +182,18 @@ class Main {
                     break;
 
                 case "read":{
-                    verb = new ReadVerb(human_line, chunks, virtual_context);
+                    verb = new ReadVerb(i + 1, chunks, virtual_context);
                     break;
                 }
 
                 case "write":{
-                    verb = new WriteVerb(human_line, chunks, virtual_context);
+                    verb = new WriteVerb(i + 1, chunks, virtual_context);
                     break;
                 }
 
                 default: {
                     StringBuilder sb = new StringBuilder("On line ");
-                    sb.append(human_line);
+                    sb.append(i + 1);
                     sb.append(": Unrecognized verb \"");
                     sb.append(chunks[0]);
                     sb.append("\".");

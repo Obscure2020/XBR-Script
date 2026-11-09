@@ -216,7 +216,7 @@ public class FileOps {
         if(content.charAt(0) == 0xFEFF){
             content = content.substring(1);
         }
-        return content.strip().lines().map(s -> s.strip().intern()).toList().toArray(new String[0]);
+        return content.strip().lines().map(String::strip).toList().toArray(new String[0]);
     }
 
 }

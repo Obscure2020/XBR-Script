@@ -1,0 +1,6 @@
+// Test #2
+// Strings demarcated with quotation marks
+
+read assets/minecraft/textures/item/carrot.png Carrot
+write Carrot "Carrot with spaces.png"
+write Carrot Carrot_without_spaces.png

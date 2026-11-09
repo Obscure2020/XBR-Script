@@ -5,7 +5,7 @@ public class ReadVerb implements ProcedureVerb {
     private final String read_target;
     private final String write_variable;
 
-    public ReadVerb(long human_line, String[] chunks, HashSet<String> virtual_context) throws Exception {
+    public ReadVerb(int human_line, String[] chunks, HashSet<String> virtual_context) throws Exception {
         if(chunks.length != 3){
             throw new ProcedureParseException("On line " + human_line + ": Invalid number of arguments for a read operation.");
         }
